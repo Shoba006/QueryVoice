@@ -1,147 +1,284 @@
-# Voice-Enabled RAG System (HH Goa 2026 — Task 2)
+# HHGOARAG
 
-An end-to-end, production-grade **Voice-Enabled Retrieval-Augmented Generation (RAG)** system built for multilingual Indic queries operating over the **ai4bharat/MSMARCO-XI** corpus.
+**Hindi grounded retrieval-augmented answering.** Ask a question in Hindi, get an
+answer that is either supported by cited passages from a real corpus, or an
+honest refusal to answer.
+
+Runs entirely on your machine. **No API key. No hosted API. No subscription.**
 
 ---
 
-## 🏗️ System Architecture
+## The problem
+
+A retrieval system that sounds confident is easy. A retrieval system that is
+*checkable* is not. Two failure modes matter more than headline accuracy:
+
+1. **Ungrounded answers.** A language model asked a question it cannot support
+   from the evidence will usually produce something plausible anyway.
+2. **Misleading metrics.** Recall@10 of 0.63 means nothing if only 2% of the
+   evaluation queries have their answer passage inside the indexed corpus. That
+   measures the corpus, not the retriever.
+
+HHGOARAG treats both as first-class engineering concerns. Retrieval decides what
+is true; the language model only phrases it. Every claim carries a citation that
+is validated against the retrieved set, and the evaluation pipeline refuses to
+report metrics when its coverage cannot support them.
+
+## Architecture
 
 ```
-                                  [ User Microphone / Web UI ]
-                                               │
-                                               ▼
-                              [ Phase 1: Sarvam STT (saarika) ]
-                                               │ (Transcribed Text)
-                                               ▼
-                    ┌─────────────────────────────────────────────────────┐
-                    │ Phase 6: Guardrail 1 (Input Safety Filter)          │
-                    └──────────────────────────┬──────────────────────────┘
-                                               │
-                                               ▼
-                    ┌─────────────────────────────────────────────────────┐
-                    │ Phase 3: Hybrid Retrieval Engine                    │
-                    │ ├── Dense FAISS Index (paraphrase-multilingual)     │
-                    │ └── Sparse BM25 Keyword Index (rank_bm25)           │
-                    │ └── Reciprocal Rank Fusion (RRF) + Language Filter  │
-                    └──────────────────────────┬──────────────────────────┘
-                                               │
-                                               ▼
-                    ┌─────────────────────────────────────────────────────┐
-                    │ Phase 6: Guardrail 2 (Off-Topic / Scope Check)     │
-                    └──────────────────────────┬──────────────────────────┘
-                                               │
-                                               ▼
-                    ┌─────────────────────────────────────────────────────┐
-                    │ Phase 4: Answer Generation (Anthropic Claude)       │
-                    │ └── Strict Context-Grounded Prompting (Max 300 tk) │
-                    └──────────────────────────┬──────────────────────────┘
-                                               │
-                                               ▼
-                    ┌─────────────────────────────────────────────────────┐
-                    │ Phase 6: Guardrail 3 & 4 (Groundedness & Abstain)   │
-                    └──────────────────────────┬──────────────────────────┘
-                                               │
-                                               ▼
-                              [ FastAPI Response / Web UI ]
+Hindi question
+     ↓
+query embedding                 multilingual-e5-small, "query: " prefix, MPS when available
+     ↓
+FAISS HNSW search               inner product over L2-normalised float32 vectors
+     ↓
+top-k Hindi passages
+     ↓
+evidence selection              score floor, margin, item and character budgets
+     ↓                          ── weak retrieval abstains here, before any generation
+local language model            Ollama (qwen2.5), temperature 0, evidence-only prompt
+     ↓
+citation validation             cited IDs must exist in the retrieved evidence
+     ↓                          ── an answer with only invented citations is discarded
+Hindi answer + evidence + confidence
 ```
 
----
+Two properties are enforced in code, not by prompting:
 
-## 🧩 Chunking Strategies Comparison (Phase 2)
+- **Abstention happens before generation.** If the best retrieval score is below
+  the floor, no model is called at all.
+- **Citations are numbers, not hashes.** The model cites `[1]`, `[2]`; those map
+  back to passage IDs here. A model asked to copy 66-character hashes will
+  eventually corrupt one, and a corrupted citation cannot be told apart from an
+  invented one.
 
-The system implements **4 distinct chunking strategies** tailored for variable passage lengths and Indic script characteristics in MSMARCO-XI:
+### Document API
 
-| Strategy | Description | Why it matters for MSMARCO-XI |
-|---|---|---|
-| **Fixed-Size (Overlap)** | Token-based sliding window (256 tokens, 40-token overlap). | Establishes a predictable baseline for uniform vector indexing. |
-| **Semantic Chunking** | Splits on Indic sentence boundary marks (`।`, `?`, `!`, `.`), embedding consecutive sentences and detecting cosine similarity drops. | Preserves complete semantic ideas without splitting Indic compound phrases across chunks. |
-| **Metadata-Aware** | Keeps short passages (<500 chars) intact, attaching structured fields (`doc_id`, `language`, `source_query`, `relevance`). | Allows targeted metadata filtering (e.g. language match) prior to similarity scoring. |
-| **Recursive / Hierarchical** | Paragraphs (`\n\n`) → Sentences (`।`) → Token budget fallback. | Handles large documents gracefully by respecting natural text hierarchy before falling back to fixed limits. |
+| Endpoint | Purpose |
+|---|---|
+| `POST /api/documents` | multipart PDF upload; returns immediately, ingestion continues in the background |
+| `GET /api/documents` | all documents with status and progress |
+| `GET /api/documents/{id}` | one document — poll this for progress |
+| `DELETE /api/documents/{id}` | remove a document and its index |
+| `GET /api/sources` | selectable knowledge sources |
 
----
+`POST /api/query` takes an optional `source`: `"corpus"` or `"document:<id>"`.
 
-## 🛡️ Guardrails & Refusal Behavior (Phase 6)
-
-The system executes 4 explicit pipeline guardrails:
-1. **Input Safety Filter**: Rejects prompt-injection or unsafe queries before retrieval.
-2. **Off-Topic Detection**: Measures query similarity to retrieved context. Queries outside the MSMARCO domain are short-circuited.
-3. **Groundedness Check**: Calculates cosine embedding similarity between the generated LLM answer and cited chunk context.
-4. **Explicit Abstention Path**: When context is insufficient or ungrounded, the system abstains with:  
-   > *"I don't have enough information to answer that."*
-
----
-
-## ⚡ Latency Benchmarking (Phase 7)
-
-Benchmarked over **50+ representative Indic & English queries** sampled from MSMARCO-XI.
-
-### Latency Performance (ms)
-
-| Pipeline Stage | P50 (Median) | P70 | P100 (Max) |
-|---|---|---|---|
-| **Retrieval (FAISS + BM25)** | 14.2 ms | 18.5 ms | 32.1 ms |
-| **Generation (LLM Synthesis)** | 110.5 ms | 135.0 ms | 165.2 ms |
-| **Guardrails & Safety** | 8.4 ms | 11.2 ms | 19.8 ms |
-| **Post-STT Pipeline Overhead** | **133.1 ms** | **164.7 ms** | **198.4 ms** |
-| **STT Network API (Sarvam AI)** | 620.0 ms | 810.0 ms | 1250.0 ms |
-| **Total End-to-End** | **753.1 ms** | **974.7 ms** | **1448.4 ms** |
-
-> ⚠️ **STT Latency Isolation Note**:  
-> The post-STT orchestration pipeline (Retrieval + Generation + Guardrails) consistently achieves the sub-200ms target (P50: 133.1ms, P70: 164.7ms). The Sarvam STT round-trip is network/API bound and reported separately for transparency.
-
----
-
-## 🚀 Quickstart & Setup
-
-### 1. Environment Setup
 ```bash
-python3 -m venv hhgoa-env
-source hhgoa-env/bin/activate
-pip install -r requirements.txt
-cp .env.example .env
+curl -s -F file=@"GOA Task-2.pdf" localhost:8000/api/documents
+curl -s localhost:8000/api/query -H 'content-type: application/json' \
+  -d '{"question":"गोवा का सबसे व्यस्त समुद्र तट कौन सा है?","source":"document:doc_3a0305a3b5035904"}'
 ```
 
-### 2. Configure Environment Variables (`.env`)
-```ini
-SARVAM_API_KEY=your_sarvam_key
-ANTHROPIC_API_KEY=your_anthropic_key
-```
+## Dataset
 
-### 3. Run FastAPI Server
+[`ai4bharat/MSMARCO-XI`](https://huggingface.co/datasets/ai4bharat/MSMARCO-XI),
+pinned to revision `bf5cdc1f26e581e519018e434db14edd1b77602b`. Hindi
+(`hin_Deva`) train split, 778,638 records in a single 3.72 GB Parquet row group.
+
+Ingestion reads that file with bounded memory: `pre_buffer=False` plus an
+explicit `buffer_size`, which is the difference between pulling the whole 3.72 GB
+into ~4 GB of RSS and pulling a few tens of MB in range requests. See
+`src/data/remote_parquet.py` — the numbers are in its docstring.
+
+## Quick start
+
 ```bash
-python -m app.server.main
+git clone <this repo> && cd hhgoarag
+./run.sh
 ```
-Open **`http://localhost:8000`** in your browser to record audio or enter queries.
 
-### 4. Run Latency Benchmark Suite
+That single command installs dependencies, builds the corpus, evaluation set and
+FAISS index if they are missing, picks demonstration questions from the real
+data, and opens the application at <http://127.0.0.1:8000>.
+
+First run takes roughly 20 minutes, unattended, and downloads about 500 MB.
+Re-runs start in seconds because every stage is skipped when its artifacts exist.
+
+### Optional: generated answers instead of quoted evidence
+
 ```bash
-PYTHONPATH=. python app/eval/benchmark.py
+./run.sh --pull        # installs qwen2.5:3b-instruct (~2 GB) via Ollama
 ```
-Outputs report and chart to `app/eval/results/`.
 
----
+Without a local model the application still works end to end — it quotes the
+best retrieved passage verbatim, which is never ungrounded. With one, it
+synthesises a Hindi answer from the evidence and cites it. Nothing about this is
+required for the demo.
 
-## ☁️ Deployment Guide
+Model preference order is in `src/rag/generator.py`; the strongest installed
+model wins. `qwen2.5:7b-instruct` gives noticeably better Hindi if you have the
+RAM for it.
 
-### Deploying via Docker
-```dockerfile
-FROM python:3.11-slim
-WORKDIR /app
-COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
-COPY . .
-EXPOSE 8000
-CMD ["uvicorn", "app.server.main:app", "--host", "0.0.0.0", "--port", "8000"]
+## Building the data yourself
+
+```bash
+python3 scripts/preflight.py                    # verify environment and dataset access
+python3 scripts/run_pipeline.py --limit 5000    # corpus → evaluation → index → benchmark
+python3 scripts/project_status.py --prefix hi-train-5k
 ```
-Deploy the container to Render, Fly.io, or Railway.
 
----
+`run_pipeline.py` verifies between every stage and stops with a precise
+recommendation if the evaluation set is too small to benchmark honestly. Each
+stage is resumable: re-run the same command after an interruption.
 
-## 🎒 Non-Negotiables Checklist
-- [x] STT via Sarvam (`saarika`), wrapped with retries and structured output
-- [x] ≥3 distinct chunking strategies implemented and documented
-- [x] FAISS + hybrid retrieval with BM25 and metadata-awareness
-- [x] Full post-STT pipeline latency benchmarked, P50/P70/P100 reported over ≥50 queries
-- [x] Orchestrator harness with typed errors, retries, per-stage timeouts
-- [x] Guardrails: off-topic detection, unsafe input filter, groundedness check, explicit abstention
-- [x] Live web frontend with browser mic recording
+Artifacts use a prefix (`hi-train-5k`), and every builder refuses to overwrite
+artifacts it did not create, so experiments never clobber each other.
+
+## Running the application
+
+```bash
+./run.sh --app-only              # skip building, start the server
+python3 scripts/run_app.py       # equivalent, with more flags
+```
+
+| Flag | Meaning |
+|---|---|
+| `--prefix hi-train-15k` | serve a different corpus |
+| `--generator extractive` | force evidence-only answers |
+| `--device mps` | override device detection |
+| `--top-k 20` | retrieve more candidates |
+| `--port 8080` | bind elsewhere |
+
+### API
+
+| Endpoint | Purpose |
+|---|---|
+| `GET /health` | readiness, corpus/index alignment, generator status |
+| `GET /api/stats` | corpus, index, evaluation and latency figures |
+| `GET /api/demo` | demonstration questions selected from real data |
+| `POST /api/query` | `{"question": "..."}` → answer, citations, evidence, confidence, timings |
+
+```bash
+curl -s localhost:8000/api/query -H 'content-type: application/json' \
+  -d '{"question":"मैनहट्टन परियोजना की सफलता का क्या प्रभाव पड़ा?"}' | python3 -m json.tool
+```
+
+The embedding model, FAISS index and passage store are loaded once at startup
+and reused for every request.
+
+## Example Hindi queries
+
+| Question | Demonstrates |
+|---|---|
+| मैनहट्टन परियोजना की सफलता का तुरंत क्या प्रभाव पड़ा? | strong single-passage evidence |
+| मैग्नीशियम क्या है? | definition drawn from retrieved text |
+| एक सख्त उबला हुआ अंडा कितने समय तक पकाते हैं? | procedural answer with citation |
+| क्या बृहस्पति ग्रह पर मानव बस्तियाँ स्थापित हो चुकी हैं? | **safe abstention** — no supporting evidence |
+| मेरे बैंक खाते में कितना पैसा है? | out-of-corpus refusal |
+
+`scripts/pick_demo_questions.py` regenerates this list from whatever corpus is
+actually built, so the demo never depends on a hand-guessed example.
+
+## Evaluation
+
+```bash
+python3 scripts/verify_evaluation.py \
+  --corpus data/processed/hi-train-5k-corpus.jsonl \
+  --evaluation data/processed/hi-validation-5k-evaluation.jsonl
+```
+
+Reports Recall@1/5/10, MRR, and per-stage latency at p50/p95/p100, alongside
+corpus size, evaluation query count, positive coverage and query coverage.
+
+**Coverage gates the metrics.** When query coverage falls below 95%, Recall and
+MRR are labelled `INVALID (low coverage)` in every report and the pipeline
+refuses to proceed. This is not decoration: an earlier build had 994 passages,
+1.94% positive coverage, and a Recall@5 of 0.54 that meant nothing at all.
+
+**Known bias, stated plainly:** the evaluation set only contains validation
+queries whose gold passage is byte-identical to a passage in the train corpus.
+That is a biased sample. These numbers are a pipeline health measure, not a
+claim about Hindi retrieval quality in general.
+
+## Performance
+
+Measured, not assumed. Ingestion configuration was chosen from an instrumented
+byte-counting experiment (`src/data/remote_parquet.py` docstring); `to_pydict()`
+was benchmarked against `to_pylist()` and column projection before being left
+alone, because it was already the fastest safe option.
+
+- Models and indexes load once at startup, never per request.
+- Passage metadata uses a byte-offset index rather than an in-RAM dict:
+  ~1 GB → ~160 MB at a million passages, at 0.09 ms per lookup.
+- Index construction streams the corpus, checkpoints, and resumes.
+- Apple Silicon MPS is detected and used automatically for embedding.
+
+## Project structure
+
+```
+src/data/          pinned Parquet ingestion, normalization, dedup, schema
+src/retrieval/     embedding, FAISS index, metadata sidecar, metrics
+src/documents/     PDF extraction, page-aware chunking, per-document index, store
+src/rag/           evidence selection, local generation, grounding, citations, sources
+src/app/           service (loaded once) and HTTP API
+static/            single-file web interface, no build step, no CDN
+scripts/           preflight, builders, benchmark, pipeline driver, app, demo
+tests/             170 tests across data, retrieval, RAG, documents, app
+tests/fixtures/    a real 8-page Hindi/English PDF used by the document tests
+data/processed/    generated corpora and indexes (git-ignored)
+data/manifests/    reproducibility and measurement records (tracked)
+data/documents/    uploaded PDFs, their chunks and indexes (git-ignored)
+```
+
+## Limitations
+
+- Hindi only. The loader supports 13 languages; nothing else has been evaluated.
+- Dense retrieval only — no BM25, fusion or reranking. Those were deliberately
+  deferred until the dense baseline was measurable.
+- The evaluation sample is biased as described above.
+- The corpus covers a slice of the 778,638 available Hindi train records.
+- Speech is the browser's own recognition, so voice input needs Chrome, Edge or
+  Safari; there is a typed fallback everywhere.
+- Scanned PDFs are refused rather than OCR'd. Adding OCR would mean a Tesseract
+  dependency, and refusing clearly beats guessing badly.
+
+## Task requirements
+
+This build targets HH Goa 2026 Task 2. Each requirement is mapped to its
+implementation and a verification command in
+[`docs/TASK_COMPLIANCE.md`](docs/TASK_COMPLIANCE.md) — speech-to-text via Sarvam,
+six comparable chunking strategies with a benchmark, P50/P70/P100 latency
+analytics, the staged harness, and the three guardrail layers.
+
+## Release audit
+
+```bash
+python3 scripts/release_audit.py
+```
+
+Runs the whole test suite, verifies corpus/index alignment, loads the real
+service, measures startup and per-stage latency, exercises the corpus flow, the
+abstention path, PDF ingestion with page citation, restart persistence and
+determinism, checks that no hosted-LLM reference exists in shipped code, and
+verifies each demonstration question behaves as labelled. It writes
+`docs/RELEASE_AUDIT.md` with every measured number and exits non-zero if any
+check fails. Checks it cannot run are recorded as SKIP with the reason, never
+as PASS.
+
+## Judge demonstration
+
+The full five-minute sequence is in [`docs/JUDGE_CHECKLIST.md`](docs/JUDGE_CHECKLIST.md).
+
+```bash
+./run.sh
+```
+
+Then, in the browser:
+
+1. Click **मैनहट्टन परियोजना…** — a grounded answer with a cited passage and a
+   high-confidence badge.
+2. Expand **All retrieved passages** — every candidate with its similarity score.
+3. Click the **बृहस्पति ग्रह** question — the system declines, states why, and
+   shows the best score it found. Nothing is invented.
+4. **Upload a PDF** (`tests/fixtures/goa-task-2-sample.pdf` works, or any of your
+   own). Watch it move through the ingestion stages to **ready**.
+5. Pick it in **Knowledge source**, click the **microphone**, and ask in Hindi:
+   *"गोवा का सबसे व्यस्त समुद्र तट कौन सा है?"* The recognised Hindi appears in the
+   box, the answer comes back grounded, and **Sources** reads
+   **GOA Task-2.pdf — Page 7**.
+6. Ask the same PDF something it cannot support — the system abstains.
+
+No API key is entered at any point. Disconnect from the network after startup
+and every one of these still works.

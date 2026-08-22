@@ -1,0 +1,659 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Voice-Enabled RAG System | Indic MSMARCO-XI</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --bg-dark: #0b0f19;
+      --card-bg: rgba(18, 24, 38, 0.75);
+      --border-color: rgba(255, 255, 255, 0.1);
+      --accent-primary: #3b82f6;
+      --accent-gradient: linear-gradient(135deg, #3b82f6 0%, #8b5cf6 100%);
+      --text-main: #f3f4f6;
+      --text-muted: #9ca3af;
+      --success-green: #10b981;
+      --warning-amber: #f59e0b;
+      --danger-red: #ef4444;
+    }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: 'Outfit', sans-serif;
+      background-color: var(--bg-dark);
+      color: var(--text-main);
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      background-image: 
+        radial-gradient(at 0% 0%, rgba(59, 130, 246, 0.15) 0px, transparent 50%),
+        radial-gradient(at 100% 100%, rgba(139, 92, 246, 0.15) 0px, transparent 50%);
+    }
+
+    header {
+      padding: 1.25rem 2rem;
+      border-bottom: 1px solid var(--border-color);
+      backdrop-filter: blur(12px);
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+
+    header h1 {
+      font-size: 1.4rem;
+      font-weight: 700;
+      background: var(--accent-gradient);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+    }
+
+    .header-actions {
+      display: flex;
+      gap: 0.75rem;
+      align-items: center;
+    }
+
+    .badge {
+      background: rgba(59, 130, 246, 0.15);
+      color: var(--accent-primary);
+      padding: 0.3rem 0.8rem;
+      border-radius: 9999px;
+      font-size: 0.8rem;
+      border: 1px solid rgba(59, 130, 246, 0.3);
+      font-weight: 500;
+    }
+
+    .badge.target-pass {
+      background: rgba(16, 185, 129, 0.15);
+      color: var(--success-green);
+      border-color: rgba(16, 185, 129, 0.4);
+    }
+    .badge.target-fail {
+      background: rgba(239, 68, 68, 0.15);
+      color: var(--danger-red);
+      border-color: rgba(239, 68, 68, 0.4);
+    }
+
+    .btn-bench {
+      background: rgba(255, 255, 255, 0.08);
+      border: 1px solid var(--border-color);
+      color: var(--text-main);
+      padding: 0.4rem 0.9rem;
+      border-radius: 0.5rem;
+      font-size: 0.85rem;
+      cursor: pointer;
+      font-weight: 500;
+      transition: background 0.2s;
+    }
+    .btn-bench:hover { background: rgba(255, 255, 255, 0.15); }
+
+    main {
+      max-width: 1240px;
+      margin: 1.5rem auto;
+      padding: 0 1.5rem;
+      width: 100%;
+      display: grid;
+      grid-template-columns: 1fr 1.1fr;
+      gap: 1.5rem;
+    }
+
+    @media (max-width: 900px) {
+      main { grid-template-columns: 1fr; }
+    }
+
+    .card {
+      background: var(--card-bg);
+      border: 1px solid var(--border-color);
+      border-radius: 1rem;
+      padding: 1.25rem 1.5rem;
+      backdrop-filter: blur(16px);
+      box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.37);
+    }
+
+    .card-title {
+      font-size: 1.05rem;
+      font-weight: 600;
+      margin-bottom: 0.85rem;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      color: #e5e7eb;
+    }
+
+    .controls-grid {
+      display: flex;
+      flex-direction: column;
+      gap: 1.25rem;
+    }
+
+    .mic-container {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      padding: 1.5rem;
+      border: 2px dashed var(--border-color);
+      border-radius: 0.85rem;
+      transition: all 0.3s ease;
+    }
+
+    .mic-btn {
+      width: 72px;
+      height: 72px;
+      border-radius: 50%;
+      border: none;
+      background: var(--accent-gradient);
+      color: white;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      box-shadow: 0 0 20px rgba(59, 130, 246, 0.4);
+      transition: transform 0.2s, box-shadow 0.2s;
+    }
+
+    .mic-btn:hover {
+      transform: scale(1.05);
+      box-shadow: 0 0 30px rgba(139, 92, 246, 0.6);
+    }
+
+    .mic-btn.recording {
+      animation: pulse 1.5s infinite;
+      background: linear-gradient(135deg, #ef4444 0%, #dc2626 100%);
+    }
+
+    @keyframes pulse {
+      0% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.7); }
+      70% { box-shadow: 0 0 0 20px rgba(239, 68, 68, 0); }
+      100% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0); }
+    }
+
+    .input-group {
+      display: flex;
+      gap: 0.5rem;
+      margin-top: 0.85rem;
+    }
+
+    input[type="text"] {
+      flex: 1;
+      padding: 0.7rem 1rem;
+      border-radius: 0.5rem;
+      border: 1px solid var(--border-color);
+      background: rgba(0, 0, 0, 0.25);
+      color: var(--text-main);
+      font-size: 0.9rem;
+    }
+
+    select {
+      padding: 0.7rem 1rem;
+      border-radius: 0.5rem;
+      border: 1px solid var(--border-color);
+      background: rgba(255, 255, 255, 0.06);
+      color: var(--text-main);
+      cursor: pointer;
+      font-size: 0.85rem;
+    }
+
+    button.submit-btn {
+      padding: 0.7rem 1.25rem;
+      border-radius: 0.5rem;
+      border: none;
+      background: var(--accent-gradient);
+      color: white;
+      font-weight: 600;
+      cursor: pointer;
+    }
+
+    /* Output Card */
+    .answer-box {
+      background: rgba(0, 0, 0, 0.35);
+      border-radius: 0.75rem;
+      padding: 1rem 1.25rem;
+      border-left: 4px solid var(--accent-primary);
+      margin-bottom: 1rem;
+      line-height: 1.6;
+      font-size: 0.95rem;
+    }
+
+    .guardrail-badges {
+      display: flex;
+      gap: 0.4rem;
+      flex-wrap: wrap;
+      margin-bottom: 0.85rem;
+    }
+
+    .g-badge {
+      font-size: 0.75rem;
+      padding: 0.25rem 0.55rem;
+      border-radius: 0.35rem;
+      font-weight: 500;
+    }
+    .g-badge.pass { background: rgba(16, 185, 129, 0.15); color: var(--success-green); border: 1px solid rgba(16, 185, 129, 0.3); }
+    .g-badge.fail { background: rgba(239, 68, 68, 0.15); color: var(--danger-red); border: 1px solid rgba(239, 68, 68, 0.3); }
+    .g-badge.case { background: rgba(139, 92, 246, 0.15); color: #a78bfa; border: 1px solid rgba(139, 92, 246, 0.3); }
+
+    /* Latency table */
+    .latency-bar-container {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 0.8rem;
+    }
+    .latency-row {
+      display: flex;
+      justify-content: space-between;
+      margin-bottom: 0.25rem;
+      color: var(--text-muted);
+    }
+    .bar-outer {
+      height: 5px;
+      background: rgba(255, 255, 255, 0.08);
+      border-radius: 3px;
+      overflow: hidden;
+      margin-bottom: 0.6rem;
+    }
+    .bar-inner {
+      height: 100%;
+      background: var(--accent-gradient);
+      width: 0%;
+      transition: width 0.4s ease;
+    }
+
+    .chunk-item {
+      background: rgba(255, 255, 255, 0.025);
+      border: 1px solid var(--border-color);
+      border-radius: 0.5rem;
+      padding: 0.7rem;
+      margin-bottom: 0.5rem;
+      font-size: 0.825rem;
+    }
+    .chunk-header {
+      display: flex;
+      justify-content: space-between;
+      color: var(--text-muted);
+      margin-bottom: 0.25rem;
+      font-size: 0.725rem;
+      font-family: 'JetBrains Mono', monospace;
+    }
+
+    /* Modal */
+    .modal-overlay {
+      position: fixed;
+      top: 0; left: 0; right: 0; bottom: 0;
+      background: rgba(0, 0, 0, 0.75);
+      backdrop-filter: blur(8px);
+      display: none;
+      align-items: center;
+      justify-content: center;
+      z-index: 1000;
+    }
+    .modal-content {
+      background: #121826;
+      border: 1px solid var(--border-color);
+      border-radius: 1rem;
+      padding: 1.5rem;
+      max-width: 700px;
+      width: 90%;
+      max-height: 80vh;
+      overflow-y: auto;
+      color: var(--text-main);
+    }
+    .bench-table {
+      width: 100%;
+      border-collapse: collapse;
+      margin-top: 1rem;
+      font-size: 0.85rem;
+      font-family: 'JetBrains Mono', monospace;
+    }
+    .bench-table th, .bench-table td {
+      padding: 0.6rem 0.8rem;
+      text-align: left;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+    }
+    .bench-table th { background: rgba(255, 255, 255, 0.04); color: var(--accent-primary); }
+  </style>
+</head>
+<body>
+
+  <header>
+    <h1>Voice RAG System</h1>
+    <div class="header-actions">
+      <button class="btn-bench" onclick="openBenchmarkModal()">📊 View Latency Benchmark</button>
+      <div id="targetVerdictBadge" class="badge target-pass">Target: &lt;200 ms PASS</div>
+    </div>
+  </header>
+
+  <main>
+    <!-- Left Column: Input & Controls -->
+    <div class="controls-grid">
+      <div class="card">
+        <div class="card-title">🎙️ Voice Input</div>
+        <div class="mic-container">
+          <button id="micBtn" class="mic-btn" title="Click to Record">
+            <svg width="30" height="30" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3z"/>
+              <path d="M19 10v2a7 7 0 0 1-14 0v-2"/>
+              <line x1="12" y1="19" x2="12" y2="22"/>
+            </svg>
+          </button>
+          <p id="micStatus" style="margin-top: 0.75rem; color: var(--text-muted); font-size: 0.85rem;">
+            Click to record speech (Indic / English)
+          </p>
+        </div>
+
+        <div style="margin-top: 1.25rem;">
+          <label style="font-size: 0.8rem; color: var(--text-muted); font-weight: 500;">Select Chunking Strategy:</label>
+          <select id="chunkStrategy" style="width: 100%; margin-top: 0.35rem;">
+            <option value="semantic" selected>Semantic Chunking (Sentence Similarity Drop)</option>
+            <option value="fixed_size">Fixed-Size Chunking (256 Tokens, 0 Overlap)</option>
+            <option value="fixed_overlap">Fixed-Size Chunking (256 Tokens, 50 Overlap)</option>
+            <option value="sentence">Sentence-Based Chunking (1 Sentence / Chunk)</option>
+            <option value="metadata_aware">Metadata-Aware Chunking (Passage Intact)</option>
+            <option value="recursive">Recursive Chunking (Hierarchical)</option>
+          </select>
+        </div>
+
+        <div class="input-group">
+          <input type="text" id="textInput" placeholder="Or type text query in Hindi / English...">
+          <button class="submit-btn" id="submitTextBtn">Send</button>
+        </div>
+      </div>
+
+      <!-- Detailed Latency Analytics Card -->
+      <div class="card">
+        <div class="card-title">⚡ Stage Latency Breakdown (Monotonic Timer)</div>
+        <div class="latency-bar-container">
+          <div class="latency-row">
+            <span>FAISS Dense Vector Search:</span>
+            <span id="faissMs">0.0 ms</span>
+          </div>
+          <div class="bar-outer"><div id="faissBar" class="bar-inner"></div></div>
+
+          <div class="latency-row">
+            <span>BM25 Lexical Keyword Search:</span>
+            <span id="bm25Ms">0.0 ms</span>
+          </div>
+          <div class="bar-outer"><div id="bm25Bar" class="bar-inner"></div></div>
+
+          <div class="latency-row">
+            <span>RRF Rank Fusion:</span>
+            <span id="fusionMs">0.0 ms</span>
+          </div>
+          <div class="bar-outer"><div id="fusionBar" class="bar-inner"></div></div>
+
+          <div class="latency-row" style="font-weight: 500; color: #a78bfa;">
+            <span>Total Parallel Hybrid Retrieval:</span>
+            <span id="retMs">0.0 ms</span>
+          </div>
+          <div class="bar-outer"><div id="retBar" class="bar-inner"></div></div>
+
+          <div class="latency-row">
+            <span>Answer Generation (LLM):</span>
+            <span id="genMs">0.0 ms</span>
+          </div>
+          <div class="bar-outer"><div id="genBar" class="bar-inner"></div></div>
+
+          <div class="latency-row">
+            <span>Guardrails & Safety Check:</span>
+            <span id="guardMs">0.0 ms</span>
+          </div>
+          <div class="bar-outer"><div id="guardBar" class="bar-inner"></div></div>
+
+          <div class="latency-row" style="font-weight: 700; color: var(--accent-primary); font-size: 0.85rem;">
+            <span>Post-STT Pipeline Elapsed (&lt;200ms Target):</span>
+            <span id="pipelineMs">0.0 ms</span>
+          </div>
+          <div class="bar-outer"><div id="pipeBar" class="bar-inner" style="background: linear-gradient(135deg, #10b981 0%, #3b82f6 100%);"></div></div>
+
+          <div class="latency-row" style="color: var(--text-muted); font-size: 0.75rem;">
+            <span>STT API (Sarvam Network Bound):</span>
+            <span id="sttMs">0.0 ms</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Right Column: Output & Guardrails -->
+    <div class="controls-grid">
+      <div class="card">
+        <div class="card-title">
+          <span>💬 Query & Synthesized Answer</span>
+          <span id="activeStrategyBadge" class="badge" style="font-size: 0.7rem;">semantic</span>
+        </div>
+
+        <div style="font-size: 0.85rem; color: var(--text-muted); margin-bottom: 0.6rem;">
+          Transcript: <strong id="transcriptOutput" style="color: var(--text-main);">-</strong>
+        </div>
+
+        <div class="guardrail-badges" id="guardrailContainer">
+          <span class="g-badge case" id="caseBadge">Case 1: Normal Answer</span>
+          <span class="g-badge pass">Input Safety: Pass</span>
+          <span class="g-badge pass">Domain: On-Topic</span>
+          <span class="g-badge pass">Groundedness: High</span>
+        </div>
+
+        <div class="answer-box" id="answerBox">
+          Your synthesized answer will appear here...
+        </div>
+
+        <div class="card-title" style="font-size: 0.9rem; margin-top: 1.25rem;">📚 Retrieved Context Chunks & Citations</div>
+        <div id="chunksContainer">
+          <p style="color: var(--text-muted); font-size: 0.825rem;">No context retrieved yet.</p>
+        </div>
+      </div>
+    </div>
+  </main>
+
+  <!-- Benchmark Modal -->
+  <div class="modal-overlay" id="benchModal">
+    <div class="modal-content">
+      <div style="display: flex; justify-content: space-between; align-items: center;">
+        <h2 style="font-size: 1.2rem; color: var(--text-main);">50-Query Latency Benchmark Summary</h2>
+        <button onclick="closeBenchmarkModal()" style="background: none; border: none; color: var(--text-muted); cursor: pointer; font-size: 1.2rem;">✕</button>
+      </div>
+      <div id="modalStatusBadge" class="badge target-pass" style="margin-top: 0.5rem; display: inline-block;">Target: PASS</div>
+      
+      <table class="bench-table">
+        <thead>
+          <tr>
+            <th>Pipeline Stage</th>
+            <th>P50 (ms)</th>
+            <th>P70 (ms)</th>
+            <th>P100 (ms)</th>
+            <th>Mean (ms)</th>
+          </tr>
+        </thead>
+        <tbody id="benchTableBody">
+          <tr><td colspan="5">Loading benchmark stats...</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <script>
+    let mediaRecorder;
+    let audioChunks = [];
+    let isRecording = false;
+
+    const micBtn = document.getElementById('micBtn');
+    const micStatus = document.getElementById('micStatus');
+    const submitTextBtn = document.getElementById('submitTextBtn');
+    const textInput = document.getElementById('textInput');
+    const chunkStrategy = document.getElementById('chunkStrategy');
+
+    micBtn.addEventListener('click', async () => {
+      if (!isRecording) {
+        try {
+          const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+          mediaRecorder = new MediaRecorder(stream);
+          audioChunks = [];
+
+          mediaRecorder.ondataavailable = event => {
+            if (event.data.size > 0) audioChunks.push(event.data);
+          };
+
+          mediaRecorder.onstop = async () => {
+            const audioBlob = new Blob(audioChunks, { type: 'audio/wav' });
+            sendAudioToAPI(audioBlob);
+          };
+
+          mediaRecorder.start();
+          isRecording = true;
+          micBtn.classList.add('recording');
+          micStatus.textContent = "Recording... Click again to stop.";
+        } catch (err) {
+          alert("Microphone access error: " + err.message);
+        }
+      } else {
+        mediaRecorder.stop();
+        isRecording = false;
+        micBtn.classList.remove('recording');
+        micStatus.textContent = "Processing audio...";
+      }
+    });
+
+    submitTextBtn.addEventListener('click', () => {
+      const q = textInput.value.trim();
+      if (q) sendTextToAPI(q);
+    });
+
+    async function sendAudioToAPI(blob) {
+      const formData = new FormData();
+      formData.append('audio', blob, 'recording.wav');
+      formData.append('chunk_strategy', chunkStrategy.value);
+      executePipeline(formData);
+    }
+
+    async function sendTextToAPI(text) {
+      const formData = new FormData();
+      formData.append('text_query', text);
+      formData.append('chunk_strategy', chunkStrategy.value);
+      executePipeline(formData);
+    }
+
+    async function executePipeline(formData) {
+      document.getElementById('answerBox').textContent = "Retrieving context & generating answer...";
+      try {
+        const response = await fetch('/ask', { method: 'POST', body: formData });
+        const data = await response.json();
+        renderResponse(data);
+      } catch (err) {
+        document.getElementById('answerBox').textContent = "Error executing request: " + err.message;
+      }
+    }
+
+    function renderResponse(data) {
+      document.getElementById('transcriptOutput').textContent = data.transcript || "-";
+      document.getElementById('answerBox').textContent = data.answer || "No response.";
+      document.getElementById('activeStrategyBadge').textContent = data.chunk_strategy || chunkStrategy.value;
+
+      // Guardrail Verdict & Case Badge
+      const g = data.guardrail_verdict;
+      const gContainer = document.getElementById('guardrailContainer');
+      const gCase = g.guardrail_case || "Case 1: Normal Answer";
+      
+      gContainer.innerHTML = `
+        <span class="g-badge case">${gCase}</span>
+        <span class="g-badge ${g.is_safe ? 'pass' : 'fail'}">Safety: ${g.is_safe ? 'Pass' : 'Flagged'}</span>
+        <span class="g-badge ${g.is_on_topic ? 'pass' : 'fail'}">Domain: ${g.is_on_topic ? 'On-Topic' : 'Off-Topic'}</span>
+        <span class="g-badge ${g.is_grounded ? 'pass' : 'fail'}">Groundedness: ${g.is_grounded ? 'Grounded' : 'Low'}</span>
+      `;
+
+      // Detailed Latency Breakdown
+      const b = data.latency_breakdown;
+      document.getElementById('faissMs').textContent = (b.faiss_ms || 0.0) + ' ms';
+      document.getElementById('bm25Ms').textContent = (b.bm25_ms || 0.0) + ' ms';
+      document.getElementById('fusionMs').textContent = (b.fusion_ms || 0.0) + ' ms';
+      document.getElementById('retMs').textContent = (b.retrieval_ms || 0.0) + ' ms';
+      document.getElementById('genMs').textContent = (b.generation_ms || 0.0) + ' ms';
+      document.getElementById('guardMs').textContent = (b.guardrails_ms || 0.0) + ' ms';
+      document.getElementById('pipelineMs').textContent = (b.post_stt_pipeline_ms || 0.0) + ' ms';
+      document.getElementById('sttMs').textContent = (b.stt_ms || 0.0) + ' ms';
+
+      document.getElementById('faissBar').style.width = Math.min(100, (b.faiss_ms || 0.0) * 10) + '%';
+      document.getElementById('bm25Bar').style.width = Math.min(100, (b.bm25_ms || 0.0) * 10) + '%';
+      document.getElementById('fusionBar').style.width = Math.min(100, (b.fusion_ms || 0.0) * 50) + '%';
+      document.getElementById('retBar').style.width = Math.min(100, (b.retrieval_ms || 0.0) * 5) + '%';
+      document.getElementById('genBar').style.width = Math.min(100, (b.generation_ms || 0.0) * 5) + '%';
+      document.getElementById('guardBar').style.width = Math.min(100, (b.guardrails_ms || 0.0) * 10) + '%';
+      document.getElementById('pipeBar').style.width = Math.min(100, (b.post_stt_pipeline_ms || 0.0) / 2) + '%';
+
+      // Update Header Target Badge
+      const targetBadge = document.getElementById('targetVerdictBadge');
+      if (b.post_stt_pipeline_ms < 200.0) {
+        targetBadge.className = "badge target-pass";
+        targetBadge.textContent = "Target: <200 ms PASS (" + b.post_stt_pipeline_ms + " ms)";
+      } else {
+        targetBadge.className = "badge target-fail";
+        targetBadge.textContent = "Target: <200 ms FAIL (" + b.post_stt_pipeline_ms + " ms)";
+      }
+
+      // Context Chunks Display
+      const chunksDiv = document.getElementById('chunksContainer');
+      if (data.retrieved_chunks && data.retrieved_chunks.length > 0) {
+        chunksDiv.innerHTML = data.retrieved_chunks.map(c => `
+          <div class="chunk-item">
+            <div class="chunk-header">
+              <span>ID: ${c.chunk_id} (${c.language})</span>
+              <span>RRF Score: ${c.rrf_score} | Dense: ${c.dense_score || 0} | BM25: ${c.bm25_score || 0}</span>
+            </div>
+            <div>${c.text}</div>
+          </div>
+        `).join('');
+      } else {
+        chunksDiv.innerHTML = '<p style="color: var(--text-muted); font-size: 0.825rem;">No context chunks retrieved.</p>';
+      }
+    }
+
+    async function openBenchmarkModal() {
+      document.getElementById('benchModal').style.display = 'flex';
+      try {
+        const resp = await fetch('/benchmark');
+        const data = await resp.json();
+        if (data.latency_stats) {
+          const stats = data.latency_stats;
+          const tbody = document.getElementById('benchTableBody');
+          
+          const rows = [
+            ["FAISS Dense Search", stats.faiss_ms.P50, stats.faiss_ms.P70, stats.faiss_ms.P100, stats.faiss_ms.Mean],
+            ["BM25 Lexical Search", stats.bm25_ms.P50, stats.bm25_ms.P70, stats.bm25_ms.P100, stats.bm25_ms.Mean],
+            ["RRF Rank Fusion", stats.fusion_ms.P50, stats.fusion_ms.P70, stats.fusion_ms.P100, stats.fusion_ms.Mean],
+            ["Total Parallel Retrieval", stats.retrieval_ms.P50, stats.retrieval_ms.P70, stats.retrieval_ms.P100, stats.retrieval_ms.Mean],
+            ["Answer Generation (LLM)", stats.generation_ms.P50, stats.generation_ms.P70, stats.generation_ms.P100, stats.generation_ms.Mean],
+            ["Guardrails & Safety", stats.guardrails_ms.P50, stats.guardrails_ms.P70, stats.guardrails_ms.P100, stats.guardrails_ms.Mean],
+            ["Post-STT Pipeline Total", stats.post_stt_pipeline_ms.P50, stats.post_stt_pipeline_ms.P70, stats.post_stt_pipeline_ms.P100, stats.post_stt_pipeline_ms.Mean]
+          ];
+
+          tbody.innerHTML = rows.map(r => `
+            <tr style="${r[0].includes('Total') ? 'font-weight: 600; color: #a78bfa;' : ''}">
+              <td>${r[0]}</td>
+              <td>${r[1]} ms</td>
+              <td>${r[2]} ms</td>
+              <td>${r[3]} ms</td>
+              <td>${r[4]} ms</td>
+            </tr>
+          `).join('');
+
+          const modalBadge = document.getElementById('modalStatusBadge');
+          if (data.status === "PASS") {
+            modalBadge.className = "badge target-pass";
+            modalBadge.textContent = "Target Verdict: ✅ PASS (<200ms Target Met)";
+          } else {
+            modalBadge.className = "badge target-fail";
+            modalBadge.textContent = "Target Verdict: ❌ FAIL (>200ms)";
+          }
+        }
+      } catch (err) {
+        console.error("Error fetching benchmark:", err);
+      }
+    }
+
+    function closeBenchmarkModal() {
+      document.getElementById('benchModal').style.display = 'none';
+    }
+  </script>
+</body>
+</html>

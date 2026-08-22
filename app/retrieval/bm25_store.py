@@ -20,7 +20,14 @@ class BM25IndexStore:
     """
     def __init__(self, index_dir: Path = INDEX_CACHE_DIR):
         self.index_dir = Path(index_dir)
-        self.index_dir.mkdir(parents=True, exist_ok=True)
+        try:
+            self.index_dir.mkdir(parents=True, exist_ok=True)
+        except Exception:
+            self.index_dir = Path("/tmp/indices")
+            try:
+                self.index_dir.mkdir(parents=True, exist_ok=True)
+            except Exception:
+                pass
         self.bm25: Optional[BM25Okapi] = None
         self.chunks: List[Chunk] = []
 

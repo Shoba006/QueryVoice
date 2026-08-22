@@ -25,7 +25,10 @@ orchestrator = RAGOrchestrator()
 
 # Serve static web assets
 WEB_DIR = Path("./app/web")
-WEB_DIR.mkdir(parents=True, exist_ok=True)
+try:
+    WEB_DIR.mkdir(parents=True, exist_ok=True)
+except Exception:
+    pass
 if WEB_DIR.exists():
     app.mount("/static", StaticFiles(directory=str(WEB_DIR)), name="static")
 

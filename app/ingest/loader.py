@@ -20,7 +20,10 @@ def ensure_dataset_loaded(target_dir: Path = DATASET_DIR) -> pd.DataFrame:
     Ensures local dataset exists at `./data/msmarco-xi/passages.parquet`.
     If absent, downloads representative splits from ai4bharat/MSMARCO-XI and saves locally.
     """
-    target_dir.mkdir(parents=True, exist_ok=True)
+    try:
+        target_dir.mkdir(parents=True, exist_ok=True)
+    except Exception:
+        pass
     local_file = target_dir / "passages.parquet"
 
     if local_file.exists():

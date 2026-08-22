@@ -27,7 +27,14 @@ class FAISSVectorStore:
     ):
         self.model_name = model_name
         self.index_dir = Path(index_dir)
-        self.index_dir.mkdir(parents=True, exist_ok=True)
+        try:
+            self.index_dir.mkdir(parents=True, exist_ok=True)
+        except Exception:
+            self.index_dir = Path("/tmp/indices")
+            try:
+                self.index_dir.mkdir(parents=True, exist_ok=True)
+            except Exception:
+                pass
         
         if embedder is not None:
             self.embedder = embedder
